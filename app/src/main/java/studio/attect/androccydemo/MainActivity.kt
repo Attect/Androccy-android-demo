@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -21,6 +22,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -51,22 +53,34 @@ class MainActivity : ComponentActivity() {
         AccessoryPermissionReceiver()
     }
 
+    private val accessoryReceiver by lazy {
+        AccessoryReceiver()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         registerReceiver(accessoryPermissionReceiver, IntentFilter(ACTION_REQUEST_ACCESSORY_PERMISSION))
+        registerReceiver(accessoryReceiver, IntentFilter().apply {
+            addAction(UsbManager.ACTION_USB_ACCESSORY_ATTACHED)
+            addAction(UsbManager.ACTION_USB_ACCESSORY_DETACHED)
+        })
         setContent {
             AndroccyDemoTheme {
                 // A surface container using the 'background' color from the theme
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     Column {
                         Row {
-                            RefreshAccessoryItemButton(Modifier.clickable { refreshUsbAccessoryList() })
+                            RefreshAccessoryItemButton(Modifier.clickable { refreshUsbAccessoryList(this@MainActivity, usbManager).exceptionOrNull()?.printStackTrace() })
                             AccessoryTabBar()
                         }
 
                         Divider()
                         activeUsbAccessorySession?.let {
-                            MessageList(session = it, modifier = Modifier.weight(1f))
+                            MessageList(
+                                session = it, modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxWidth()
+                            )
                             AccessoryStatusBar(session = it) { session ->
                                 usbManager.requestPermission(
                                     session.usbAccessory, PendingIntent.getBroadcast(
@@ -90,42 +104,48 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        refreshUsbAccessoryList()
+        refreshUsbAccessoryList(this, usbManager)
     }
 
     override fun onDestroy() {
         super.onDestroy()
         unregisterReceiver(accessoryPermissionReceiver)
+        unregisterReceiver(accessoryReceiver)
     }
 
-    private fun refreshUsbAccessoryList() {
-        usbManager.accessoryList?.forEach {
-            var found = false
-            for (i in 0 until usbAccessorySessionList.size) {
-                if (usbAccessorySessionList[i].usbAccessory == it) {
-                    found = true
-                    break
-                }
-            }
-            if (!found) {
-                val session = UsbAccessorySession(it)
-                usbAccessorySessionList.add(session)
-                session.start(usbManager)
-                session.sendString("hello")
-            }
-        }
-        usbAccessorySessionList.forEach {
-            it.refreshState(this, usbManager)
-        }
-        if (activeUsbAccessorySession == null && usbAccessorySessionList.isNotEmpty()) {
-            activeUsbAccessorySession = usbAccessorySessionList.first()
-        }
-    }
 
 }
 
 val usbAccessorySessionList = mutableStateListOf<UsbAccessorySession>()
 var activeUsbAccessorySession: UsbAccessorySession? by mutableStateOf(null)
+
+fun refreshUsbAccessoryList(context: Context, usbManager: UsbManager): Result<Unit> = runCatching {
+    usbManager.accessoryList?.forEach {
+        var found = false
+        for (i in 0 until usbAccessorySessionList.size) {
+            val currentUsbAccessorySession = usbAccessorySessionList[i]
+            if (currentUsbAccessorySession.usbAccessory == it) {
+                found = true
+                if (!currentUsbAccessorySession.active) {
+                    currentUsbAccessorySession.start(usbManager)
+                }
+                break
+            }
+        }
+        if (!found) {
+            val session = UsbAccessorySession(it)
+            usbAccessorySessionList.add(session)
+            session.start(usbManager)
+            session.sendString("hello")
+        }
+    }
+    usbAccessorySessionList.forEach {
+        it.refreshState(context, usbManager)
+    }
+    if (activeUsbAccessorySession == null && usbAccessorySessionList.isNotEmpty()) {
+        activeUsbAccessorySession = usbAccessorySessionList.first()
+    }
+}
 
 @Composable
 @Preview
@@ -185,6 +205,10 @@ fun AccessoryStatusBar(modifier: Modifier = Modifier, session: UsbAccessorySessi
         modifier = modifier
             .background(MaterialTheme.colorScheme.primaryContainer)
     ) {
+        Checkbox(checked = session.autoScroll, onCheckedChange = {
+            session.autoScroll = it
+        })
+        Text(text = stringResource(id = R.string.auto_scroll), Modifier.align(Alignment.CenterVertically), color = MaterialTheme.colorScheme.onPrimaryContainer, fontSize = 14.sp)
         Box(modifier = Modifier.weight(1f))
         val backgroundColor: Color
         val textColor: Color
@@ -203,9 +227,9 @@ fun AccessoryStatusBar(modifier: Modifier = Modifier, session: UsbAccessorySessi
             .clickable(!session.hasPermission) {
                 doRequestPermission.invoke(session)
             }
-            .padding(8.dp)
+            .align(Alignment.CenterVertically)
         ) {
-            Text(text = text, fontSize = 12.sp, color = textColor)
+            Text(text = text, fontSize = 14.sp, color = textColor, modifier = modifier.padding(16.dp))
         }
     }
 }

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <usb-accesory
+    <usb-accessory
         manufacturer="AttectStudio"
         model="Demo"
-        version="1.0"></usb-accesory>
+        version="1.0" />
 </resources>

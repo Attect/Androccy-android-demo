@@ -3,7 +3,6 @@ package studio.attect.androccydemo
 import android.content.Context
 import android.hardware.usb.UsbAccessory
 import android.hardware.usb.UsbManager
-import android.os.ParcelFileDescriptor
 import android.util.Log
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.getValue
@@ -20,7 +19,6 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
-import java.io.FileDescriptor
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
@@ -41,6 +39,7 @@ class UsbAccessorySession(val usbAccessory: UsbAccessory) : CoroutineScope {
     var hasPermission by mutableStateOf(false)
     var active by mutableStateOf(false)
     val scrollState = LazyListState(0)
+    var autoScroll by mutableStateOf(true)
 
     fun refreshState(context: Context, usbManager: UsbManager) {
         hasPermission = usbManager.hasPermission(usbAccessory)
@@ -53,18 +52,16 @@ class UsbAccessorySession(val usbAccessory: UsbAccessory) : CoroutineScope {
         }
     }
 
-    lateinit var parcelFileDescriptor: ParcelFileDescriptor
-    lateinit var fileDescriptor: FileDescriptor
     fun start(usbManager: UsbManager) {
         launch {
-            delay(2000)
-            parcelFileDescriptor = runCatching { usbManager.openAccessory(usbAccessory) }.getOrNull() ?: return@launch
-            fileDescriptor = parcelFileDescriptor.fileDescriptor ?: return@launch
-            val inputStream = FileInputStream(fileDescriptor)
-            val outputStream = FileOutputStream(fileDescriptor)
-            active = true
+            delay(2000) //给授权逻辑一点时间
+            val parcelFileDescriptor = runCatching { usbManager.openAccessory(usbAccessory) }.getOrNull() ?: return@launch
+
 
             val readJob = launch {
+                val inputStream = FileInputStream(parcelFileDescriptor.fileDescriptor)
+
+                active = true
                 val readBuffer = ByteArray(USB_ACCESSORY_MAX_READ)
                 val byteArrayOutputStream = ByteArrayOutputStream()
                 var textLength = -1
@@ -95,16 +92,22 @@ class UsbAccessorySession(val usbAccessory: UsbAccessory) : CoroutineScope {
                         byteArrayOutputStream.write(readBuffer, 0, readCount)
                     }
                     if (byteArrayOutputStream.size() == textLength) {
-                        textLines.add(byteArrayOutputStream.toString().also { sendString("ACK:$it") })
-                        withContext(Dispatchers.Main) {
-                            scrollState.scrollToItem(textLines.size - 1)
+                        textLines.add(byteArrayOutputStream.toString().also { sendString(it) })
+                        if (autoScroll) {
+                            withContext(Dispatchers.Main) {
+                                scrollState.scrollToItem(textLines.size - 1)
+                            }
                         }
                         byteArrayOutputStream.reset()
                         textLength = -1
                     }
                 }
+                withContext(Dispatchers.IO) {
+                    inputStream.close()
+                }
             }
             val writeJob = launch {
+                val outputStream = FileOutputStream(parcelFileDescriptor.fileDescriptor)
                 val lengthBuffer = ByteBuffer.allocate(2)
                 while (isActive) {
                     val content = channel.receive()
@@ -121,20 +124,24 @@ class UsbAccessorySession(val usbAccessory: UsbAccessory) : CoroutineScope {
                             sendByteArray[i] = textByteArray[i - 2]
                         }
                     }
-                    withContext(Dispatchers.IO) {
-                        outputStream.write(sendByteArray)
+                    try {
+                        withContext(Dispatchers.IO) {
+                            outputStream.write(sendByteArray)
+                        }
+                    } catch (e: IOException) {
+                        withContext(Dispatchers.IO) {
+                            outputStream.close()
+                        }
                     }
+
                 }
             }
-
             readJob.join()
-            writeJob.join()
-            withContext(Dispatchers.IO) {
-                inputStream.close()
+            if (writeJob.isActive) {
+                writeJob.cancel()
             }
-            withContext(Dispatchers.IO) {
-                outputStream.close()
-            }
+            parcelFileDescriptor.close() //一定要记得释放，否则设备可能无法接受下一次切换为配件模式的请求
+            Log.d("DEBUG", "释放UsbAccessory")
             active = false
         }
 

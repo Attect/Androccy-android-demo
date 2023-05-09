@@ -4,4 +4,5 @@
     <string name="has_permission">已授权</string>
     <string name="requestPermission">请求授权</string>
     <string name="no_any_accessory">未切换至配件模式\n或点击刷新按钮</string>
+    <string name="auto_scroll">自动滚动</string>
 </resources>
