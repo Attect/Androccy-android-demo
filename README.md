@@ -1,6 +1,6 @@
 # Androccy Android Demo
 
-这是(Androccy)[https://github.com/Attect/androccy]的配套例子项目。两者先后运行顺序无关。
+这是[Androccy](https://github.com/Attect/androccy)的配套例子项目。两者先后运行顺序无关。
 
 若迟迟未看到通信数据，注意右下角是否为“请求授权”按钮，点一下，会出现系统的授权对话框。
 
